@@ -1,0 +1,1011 @@
+{% extends "base.html" %}
+
+{% block title %}Gallery - AI ImageGen{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <!-- Header -->
+    <div class="text-center mb-12">
+        <h1 class="text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+            <i class="fas fa-images text-green-500 mr-4"></i>
+            Gallery
+        </h1>
+        <p class="text-xl text-gray-600 max-w-2xl mx-auto">
+            Explore all your AI-generated masterpieces. Browse through single images and visual stories you've created.
+        </p>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="text-center py-12">
+        <div class="w-12 h-12 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
+        <p class="text-gray-600">Loading your gallery...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="hidden text-center py-16">
+        <div class="text-6xl text-gray-300 mb-6">🎨</div>
+        <h3 class="text-2xl font-semibold text-gray-900 mb-4">Your Gallery is Empty</h3>
+        <p class="text-gray-600 mb-8 max-w-md mx-auto">
+            Start creating amazing AI-generated images and visual stories to see them here.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+            <a href="{{ url_for('generate_page') }}" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors">
+                <i class="fas fa-image mr-2"></i>Create Single Image
+            </a>
+            <a href="{{ url_for('story_page') }}" class="bg-purple-500 hover:bg-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors">
+                <i class="fas fa-book mr-2"></i>Create Visual Story
+            </a>
+        </div>
+    </div>
+
+    <!-- Filter and Sort Controls -->
+    <div id="controls" class="hidden bg-white rounded-xl shadow-sm p-6 mb-8">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="flex flex-col sm:flex-row gap-4">
+                <div>
+                    <label for="filterType" class="block text-sm font-medium text-gray-700 mb-1">Filter by Type</label>
+                    <select id="filterType" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="all">All Items</option>
+                        <option value="image">Single Images</option>
+                        <option value="story">Visual Stories</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="sortBy" class="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
+                    <select id="sortBy" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="newest">Newest First</option>
+                        <option value="oldest">Oldest First</option>
+                        <option value="name">Name</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-600">View:</span>
+                <button id="gridViewBtn" class="p-2 text-blue-500 bg-blue-50 rounded-lg">
+                    <i class="fas fa-th"></i>
+                </button>
+                <button id="listViewBtn" class="p-2 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
+                    <i class="fas fa-list"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gallery Grid -->
+    <div id="galleryGrid" class="hidden grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- Gallery items will be populated here -->
+    </div>
+
+    <!-- Gallery List -->
+    <div id="galleryList" class="hidden space-y-4">
+        <!-- Gallery items will be populated here -->
+    </div>
+
+    <!-- Error Section -->
+    <div id="errorSection" class="hidden">
+        <div class="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <i class="fas fa-exclamation-triangle text-red-500 text-2xl mb-4"></i>
+            <h3 class="text-lg font-semibold text-red-800 mb-2">Failed to Load Gallery</h3>
+            <p id="errorMessage" class="text-red-700 mb-4"></p>
+            <button onclick="loadGallery()" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                Retry
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Image Modal -->
+<div id="imageModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="max-w-4xl max-h-full p-4">
+        <div class="bg-white rounded-xl overflow-hidden">
+            <div class="flex items-center justify-between p-4 border-b">
+                <h3 id="modalTitle" class="text-lg font-semibold text-gray-900"></h3>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="p-4">
+                <img id="modalImage" class="w-full h-auto rounded-lg" alt="">
+                <div id="modalInfo" class="mt-4 text-sm text-gray-600"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Slideshow Modal -->
+<div id="slideshowModal" class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 hidden">
+    <div class="max-w-6xl max-h-full w-full h-full flex flex-col">
+        <!-- Slideshow Header -->
+        <div class="flex items-center justify-between p-6 text-white">
+            <div class="flex items-center gap-4">
+                <h2 id="slideshowTitle" class="text-2xl font-bold"></h2>
+                <div id="slideshowInfo" class="text-sm opacity-75"></div>
+            </div>
+            <div class="flex items-center gap-4">
+                <div id="slideshowProgress" class="text-sm">Scene 1 / 5</div>
+                <button onclick="toggleSlideshowPlayPause()" id="playPauseBtn" class="bg-white bg-opacity-20 hover:bg-opacity-30 text-white p-2 rounded-lg transition-colors">
+                    <i class="fas fa-pause" id="playPauseIcon"></i>
+                </button>
+                <button onclick="closeSlideshowModal()" class="bg-white bg-opacity-20 hover:bg-opacity-30 text-white p-2 rounded-lg transition-colors">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Main Slideshow Area -->
+        <div class="flex-1 flex items-center justify-center p-6">
+            <div class="relative w-full h-full max-w-4xl max-h-[70vh]">
+                <img id="slideshowImage" class="w-full h-full object-contain rounded-lg shadow-2xl transition-opacity duration-500" alt="">
+                
+                <!-- Navigation Arrows -->
+                <button onclick="previousSlide()" class="absolute left-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-3 rounded-full transition-colors">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <button onclick="nextSlide()" class="absolute right-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-3 rounded-full transition-colors">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+                
+                <!-- Scene Info Overlay -->
+                <div class="absolute bottom-4 left-4 right-4 bg-black bg-opacity-50 text-white p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div id="sceneTitle" class="font-semibold text-lg mb-1">Scene 1</div>
+                            <div id="sceneDescription" class="text-sm opacity-90"></div>
+                        </div>
+                        <div id="audioControls" class="hidden">
+                            <audio id="sceneAudio" controls class="h-8">
+                                <source type="audio/mpeg">
+                            </audio>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Slideshow Controls -->
+        <div class="p-6 text-white">
+            <div class="flex items-center justify-center gap-4 mb-4">
+                <button onclick="setSlideInterval('slow')" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition-colors" id="slowBtn">
+                    Slow (5s)
+                </button>
+                <button onclick="setSlideInterval('normal')" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition-colors" id="normalBtn">
+                    Normal (3s)
+                </button>
+                <button onclick="setSlideInterval('fast')" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition-colors" id="fastBtn">
+                    Fast (1s)
+                </button>
+                <button onclick="setSlideInterval('audio')" class="bg-purple-500 bg-opacity-80 hover:bg-opacity-100 px-4 py-2 rounded-lg transition-colors hidden" id="audioSyncBtn">
+                    Audio Sync
+                </button>
+            </div>
+            
+            <!-- Progress Bar -->
+            <div class="w-full bg-white bg-opacity-20 rounded-full h-2 mb-2">
+                <div id="slideshowProgressBar" class="bg-white h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            
+            <!-- Scene Thumbnails -->
+            <div id="sceneThumbnails" class="flex justify-center gap-2 overflow-x-auto">
+                <!-- Thumbnails will be populated here -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let galleryItems = [];
+let currentView = 'grid';
+
+// Load gallery on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadGallery();
+    
+    // Set up event listeners
+    document.getElementById('filterType').addEventListener('change', filterAndSort);
+    document.getElementById('sortBy').addEventListener('change', filterAndSort);
+    document.getElementById('gridViewBtn').addEventListener('click', () => setView('grid'));
+    document.getElementById('listViewBtn').addEventListener('click', () => setView('list'));
+});
+
+async function loadGallery() {
+    try {
+        document.getElementById('loadingIndicator').classList.remove('hidden');
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('errorSection').classList.add('hidden');
+        
+        const response = await fetch('/api/gallery');
+        const data = await response.json();
+        
+        if (data.items && data.items.length > 0) {
+            galleryItems = data.items;
+            showControls();
+            filterAndSort();
+        } else {
+            showEmptyState();
+        }
+    } catch (error) {
+        console.error('Error loading gallery:', error);
+        showError('Failed to load gallery: ' + error.message);
+    } finally {
+        document.getElementById('loadingIndicator').classList.add('hidden');
+    }
+}
+
+function showControls() {
+    document.getElementById('controls').classList.remove('hidden');
+}
+
+function showEmptyState() {
+    document.getElementById('emptyState').classList.remove('hidden');
+}
+
+function showError(message) {
+    document.getElementById('errorMessage').textContent = message;
+    document.getElementById('errorSection').classList.remove('hidden');
+}
+
+function filterAndSort() {
+    const filterType = document.getElementById('filterType').value;
+    const sortBy = document.getElementById('sortBy').value;
+    
+    let filteredItems = galleryItems;
+    
+    // Filter
+    if (filterType !== 'all') {
+        filteredItems = galleryItems.filter(item => item.type === filterType);
+    }
+    
+    // Sort
+    filteredItems.sort((a, b) => {
+        switch (sortBy) {
+            case 'newest':
+                return new Date(b.created_at) - new Date(a.created_at);
+            case 'oldest':
+                return new Date(a.created_at) - new Date(b.created_at);
+            case 'name':
+                return a.name.localeCompare(b.name);
+            default:
+                return 0;
+        }
+    });
+    
+    renderGallery(filteredItems);
+}
+
+function renderGallery(items) {
+    const gridContainer = document.getElementById('galleryGrid');
+    const listContainer = document.getElementById('galleryList');
+    
+    if (currentView === 'grid') {
+        gridContainer.innerHTML = '';
+        gridContainer.classList.remove('hidden');
+        listContainer.classList.add('hidden');
+        
+        items.forEach(item => {
+            const element = createGridItem(item);
+            gridContainer.appendChild(element);
+        });
+    } else {
+        listContainer.innerHTML = '';
+        listContainer.classList.remove('hidden');
+        gridContainer.classList.add('hidden');
+        
+        items.forEach(item => {
+            const element = createListItem(item);
+            listContainer.appendChild(element);
+        });
+    }
+}
+
+function createGridItem(item) {
+    const div = document.createElement('div');
+    div.className = 'bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow overflow-hidden';
+    
+    const isStory = item.type === 'story';
+    const displayImage = isStory && item.scenes && item.scenes.length > 0 ? 
+        `/generated_images/${item.name}/${item.scenes[0].filename}` : `/generated_images/${item.name}`;
+    
+    div.innerHTML = `
+        <div class="aspect-square bg-gray-100 relative overflow-hidden">
+            ${isStory ? `
+                <div class="absolute top-2 left-2 bg-purple-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    <i class="fas fa-book mr-1"></i>Story
+                </div>
+                <div class="absolute top-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                    ${item.scene_count} scenes
+                </div>
+                ${item.has_narration ? `
+                    <div class="absolute bottom-2 left-2 bg-green-500 text-white px-2 py-1 rounded text-xs font-medium">
+                        <i class="fas fa-volume-up mr-1"></i>Audio
+                    </div>
+                ` : ''}
+            ` : `
+                <div class="absolute top-2 left-2 bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    <i class="fas fa-image mr-1"></i>Image
+                </div>
+            `}
+            <img src="${displayImage}" alt="${item.name}" class="w-full h-full object-cover cursor-pointer" 
+                 onclick="openModal('${item.name}', '${displayImage}', '${isStory ? 'Visual Story' : 'Single Image'}')"
+                 onerror="this.src='/path/to/placeholder.jpg'">
+        </div>
+        <div class="p-4">
+            <h3 class="font-semibold text-gray-900 mb-2 truncate">${item.name}</h3>
+            <div class="flex items-center justify-between text-sm text-gray-500">
+                <span>${formatDate(item.created_at)}</span>
+                <span>${formatSize(item.size)}</span>
+            </div>
+            ${isStory && item.has_narration ? `
+                <div class="mt-2 text-xs text-green-600 font-medium">
+                    <i class="fas fa-microphone mr-1"></i>${item.audio_count} narrated scenes
+                </div>
+            ` : ''}
+            <div class="mt-3 flex gap-2">
+                ${isStory ? `
+                    <button onclick="viewStory('${item.path}')" class="flex-1 bg-purple-500 hover:bg-purple-600 text-white text-xs py-2 px-3 rounded transition-colors">
+                        <i class="fas fa-eye mr-1"></i>View Story
+                    </button>
+                ` : `
+                    <button onclick="downloadItem('${item.path}', '${item.name}')" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs py-2 px-3 rounded transition-colors">
+                        <i class="fas fa-download mr-1"></i>Download
+                    </button>
+                `}
+                <button onclick="shareItem('${item.name}', '${item.path}')" class="bg-gray-500 hover:bg-gray-600 text-white text-xs py-2 px-3 rounded transition-colors">
+                    <i class="fas fa-share"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    return div;
+}
+
+function createListItem(item) {
+    const div = document.createElement('div');
+    div.className = 'bg-white rounded-xl shadow-sm p-4 flex items-center gap-4';
+    
+    const isStory = item.type === 'story';
+    const displayImage = isStory && item.scenes && item.scenes.length > 0 ? 
+        `/generated_images/${item.name}/${item.scenes[0].filename}` : `/generated_images/${item.name}`;
+    
+    div.innerHTML = `
+        <div class="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0">
+            <img src="${displayImage}" alt="${item.name}" class="w-full h-full object-cover rounded-lg"
+                 onerror="this.src='/path/to/placeholder.jpg'">
+        </div>
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+                <h3 class="font-semibold text-gray-900 truncate">${item.name}</h3>
+                <span class="px-2 py-1 rounded text-xs font-medium ${isStory ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">
+                    ${isStory ? 'Story' : 'Image'}
+                </span>
+                ${isStory && item.has_narration ? `
+                    <span class="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700">
+                        <i class="fas fa-volume-up mr-1"></i>Narrated
+                    </span>
+                ` : ''}
+            </div>
+            <div class="text-sm text-gray-500">
+                ${formatDate(item.created_at)} • ${formatSize(item.size)}
+                ${isStory ? ` • ${item.scene_count} scenes` : ''}
+                ${isStory && item.has_narration ? ` • ${item.audio_count} audio clips` : ''}
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="downloadItem('${item.path}', '${item.name}')" class="bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors">
+                <i class="fas fa-download"></i>
+            </button>
+            <button onclick="shareItem('${item.name}', '${item.path}')" class="bg-gray-500 hover:bg-gray-600 text-white text-sm py-2 px-3 rounded transition-colors">
+                <i class="fas fa-share"></i>
+            </button>
+        </div>
+    `;
+    
+    return div;
+}
+
+function setView(view) {
+    currentView = view;
+    
+    // Update button states
+    document.getElementById('gridViewBtn').className = view === 'grid' ? 
+        'p-2 text-blue-500 bg-blue-50 rounded-lg' : 
+        'p-2 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors';
+    
+    document.getElementById('listViewBtn').className = view === 'list' ? 
+        'p-2 text-blue-500 bg-blue-50 rounded-lg' : 
+        'p-2 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors';
+    
+    filterAndSort();
+}
+
+function openModal(title, imagePath, type) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalImage').src = imagePath;
+    document.getElementById('modalInfo').textContent = type;
+    document.getElementById('imageModal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('imageModal').classList.add('hidden');
+}
+
+function downloadItem(path, name) {
+    const link = document.createElement('a');
+    link.href = path;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function shareItem(name, path) {
+    const shareText = `Check out this AI-generated ${name}!`;
+    
+    if (navigator.share) {
+        navigator.share({
+            title: name,
+            text: shareText,
+            url: window.location.origin + path
+        });
+    } else {
+        navigator.clipboard.writeText(`${shareText} ${window.location.origin + path}`).then(() => {
+            alert('Link copied to clipboard!');
+        });
+    }
+}
+
+function viewStory(storyPath) {
+    // Get story details and show in a modal
+    showStoryModal(storyPath);
+}
+
+async function showStoryModal(storyPath) {
+    try {
+        // Get story information from the gallery API
+        const response = await fetch('/api/gallery');
+        const data = await response.json();
+        
+        // Find the story in the gallery data
+        const story = data.items.find(item => item.path === storyPath && item.type === 'story');
+        
+        if (!story) {
+            alert('Story not found!');
+            return;
+        }
+        
+        // Create story viewer modal
+        const modal = document.createElement('div');
+        modal.id = 'storyModal';
+        modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+        modal.innerHTML = `
+            <div class="bg-white rounded-xl max-w-6xl max-h-full overflow-hidden">
+                <div class="flex items-center justify-between p-6 border-b">
+                    <h2 class="text-2xl font-bold text-gray-900">
+                        <i class="fas fa-book text-purple-500 mr-2"></i>
+                        ${story.name}
+                    </h2>
+                    <button onclick="closeStoryModal()" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="p-6 max-h-96 overflow-y-auto">
+                    <div class="mb-4">
+                        <p class="text-gray-600">
+                            <i class="fas fa-images mr-2"></i>
+                            ${story.scene_count} scenes • Created ${formatDate(story.created_at)}
+                            ${story.has_narration ? ` • <i class="fas fa-volume-up text-green-500 mr-1"></i>${story.audio_count} narrated scenes` : ''}
+                        </p>
+                        <div class="mt-2 flex gap-2">
+                            <button onclick="startSlideshow('${story.name}')" 
+                                    class="bg-purple-500 hover:bg-purple-600 text-white text-sm py-2 px-4 rounded transition-colors">
+                                <i class="fas fa-play mr-2"></i>Start Slideshow
+                            </button>
+                            ${story.has_narration ? `
+                                <button onclick="playStoryNarrationFromGallery('${story.name}')" 
+                                        class="bg-green-500 hover:bg-green-600 text-white text-sm py-2 px-4 rounded transition-colors">
+                                    <i class="fas fa-volume-up mr-2"></i>Play Narration
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        ${story.scenes.map((scene, index) => `
+                            <div class="bg-gray-50 rounded-lg overflow-hidden">
+                                <div class="bg-purple-500 text-white px-3 py-2 text-center">
+                                    <span class="font-semibold">Scene ${index + 1}</span>
+                                    ${scene.has_audio ? '<i class="fas fa-volume-up ml-2 text-green-200"></i>' : ''}
+                                </div>
+                                <div class="p-3">
+                                    <img src="/generated_images/${story.name}/${scene.filename}" 
+                                         alt="Scene ${index + 1}" 
+                                         class="w-full h-32 object-cover rounded mb-2 cursor-pointer"
+                                         onclick="viewImageFullscreen('/generated_images/${story.name}/${scene.filename}')">
+                                    ${scene.has_audio && scene.audio_url ? `
+                                        <div class="mb-2 p-2 bg-green-50 rounded border border-green-200">
+                                            <div class="flex items-center justify-between mb-1">
+                                                <span class="text-xs text-green-700 font-medium">
+                                                    <i class="fas fa-microphone mr-1"></i>Narration
+                                                </span>
+                                                <button onclick="playAudioFromGallery('${scene.audio_url}')" 
+                                                        class="text-green-600 hover:text-green-800">
+                                                    <i class="fas fa-play text-xs"></i>
+                                                </button>
+                                            </div>
+                                            <audio controls class="w-full" style="height: 25px;">
+                                                <source src="${scene.audio_url}" type="audio/mpeg">
+                                            </audio>
+                                        </div>
+                                    ` : ''}
+                                    <div class="flex gap-1">
+                                        <button onclick="downloadImage('/generated_images/${story.name}/${scene.filename}', '${scene.filename}')" 
+                                                class="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs py-1 px-2 rounded transition-colors">
+                                            <i class="fas fa-download mr-1"></i>Download
+                                        </button>
+                                        <button onclick="viewImageFullscreen('/generated_images/${story.name}/${scene.filename}')" 
+                                                class="flex-1 bg-gray-500 hover:bg-gray-600 text-white text-xs py-1 px-2 rounded transition-colors">
+                                            <i class="fas fa-search-plus mr-1"></i>View
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Close modal when clicking outside
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeStoryModal();
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error loading story:', error);
+        alert('Error loading story. Please try again.');
+    }
+}
+
+function closeStoryModal() {
+    const modal = document.getElementById('storyModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+    });
+}
+
+function formatSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function downloadImage(url, filename) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function viewImageFullscreen(imageUrl) {
+    const modal = document.getElementById('imageModal');
+    const img = modal.querySelector('img');
+    img.src = imageUrl;
+    modal.classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('imageModal').classList.add('hidden');
+}
+
+// Audio playback functions for gallery
+function playAudioFromGallery(audioUrl) {
+    const audio = new Audio(audioUrl);
+    audio.play().catch(error => {
+        console.error('Error playing audio:', error);
+        alert('Unable to play audio. Please check your browser settings.');
+    });
+}
+
+async function playStoryNarrationFromGallery(storyName) {
+    try {
+        // Get story data from gallery API
+        const response = await fetch('/api/gallery');
+        const data = await response.json();
+        
+        // Find the story
+        const story = data.items.find(item => item.name === storyName && item.type === 'story');
+        if (!story) {
+            alert('Story not found!');
+            return;
+        }
+        
+        // Get scenes with audio
+        const audioScenes = story.scenes.filter(scene => scene.has_audio && scene.audio_url);
+        if (audioScenes.length === 0) {
+            alert('No audio narration available for this story.');
+            return;
+        }
+        
+        // Play scenes sequentially
+        let currentIndex = 0;
+        function playNext() {
+            if (currentIndex < audioScenes.length) {
+                console.log(`Playing scene ${currentIndex + 1} narration...`);
+                const audio = new Audio(audioScenes[currentIndex].audio_url);
+                audio.onended = () => {
+                    currentIndex++;
+                    setTimeout(playNext, 500); // Small pause between scenes
+                };
+                audio.onerror = () => {
+                    console.error(`Error playing scene ${currentIndex + 1} audio`);
+                    currentIndex++;
+                    playNext();
+                };
+                audio.play().catch(error => {
+                    console.error('Error starting audio:', error);
+                    currentIndex++;
+                    playNext();
+                });
+            } else {
+                console.log('Story narration complete!');
+            }
+        }
+        playNext();
+        
+    } catch (error) {
+        console.error('Error playing story narration:', error);
+        alert('Error loading story narration.');
+    }
+}
+
+// Slideshow functionality
+let currentSlideshow = null;
+let slideshowTimer = null;
+let currentSlideIndex = 0;
+let slideshowInterval = 3000; // Default 3 seconds
+let isPlaying = true;
+
+async function startSlideshow(storyName) {
+    try {
+        // Get story data
+        const response = await fetch('/api/gallery');
+        const data = await response.json();
+        
+        const story = data.items.find(item => item.name === storyName && item.type === 'story');
+        if (!story || !story.scenes || story.scenes.length === 0) {
+            alert('Story not found or has no scenes!');
+            return;
+        }
+        
+        // Debug logging
+        console.log('Slideshow Debug - Story loaded:', {
+            storyName: story.name,
+            sceneCount: story.scenes.length,
+            scenes: story.scenes.map(scene => ({
+                sceneNumber: scene.scene_number,
+                filename: scene.filename,
+                hasAudio: scene.has_audio,
+                audioUrl: scene.audio_url
+            }))
+        });
+        
+        // Close story modal
+        closeStoryModal();
+        
+        // Initialize slideshow
+        currentSlideshow = story;
+        currentSlideIndex = 0;
+        isPlaying = true;
+        
+        // Set default interval based on narration
+        if (story.has_narration) {
+            slideshowInterval = 'audio'; // Will be handled per scene
+            document.getElementById('audioSyncBtn').classList.remove('hidden');
+        } else {
+            slideshowInterval = 3000;
+            document.getElementById('audioSyncBtn').classList.add('hidden');
+        }
+        
+        // Setup slideshow modal
+        document.getElementById('slideshowTitle').textContent = story.name;
+        document.getElementById('slideshowInfo').textContent = `${story.scene_count} scenes`;
+        
+        // Create thumbnails
+        createSlideshowThumbnails(story);
+        
+        // Show modal and start slideshow
+        document.getElementById('slideshowModal').classList.remove('hidden');
+        updateSlideDisplay();
+        
+        if (isPlaying) {
+            startSlideshowTimer();
+        }
+        
+    } catch (error) {
+        console.error('Error starting slideshow:', error);
+        alert('Error loading slideshow.');
+    }
+}
+
+function createSlideshowThumbnails(story) {
+    const container = document.getElementById('sceneThumbnails');
+    container.innerHTML = '';
+    
+    story.scenes.forEach((scene, index) => {
+        const thumb = document.createElement('div');
+        thumb.className = `w-16 h-12 bg-gray-600 rounded cursor-pointer transition-all duration-200 ${index === 0 ? 'ring-2 ring-white' : ''}`;
+        thumb.onclick = () => goToSlide(index);
+        
+        const img = document.createElement('img');
+        img.src = `/generated_images/${story.name}/${scene.filename}`;
+        img.className = 'w-full h-full object-cover rounded';
+        img.onerror = () => {
+            thumb.innerHTML = `<div class="w-full h-full flex items-center justify-center text-white text-xs">${index + 1}</div>`;
+        };
+        
+        thumb.appendChild(img);
+        container.appendChild(thumb);
+    });
+}
+
+function updateSlideDisplay() {
+    if (!currentSlideshow || !currentSlideshow.scenes) return;
+    
+    const scene = currentSlideshow.scenes[currentSlideIndex];
+    const slideImage = document.getElementById('slideshowImage');
+    
+    // Fade out
+    slideImage.style.opacity = '0';
+    
+    setTimeout(() => {
+        // Update content
+        slideImage.src = `/generated_images/${currentSlideshow.name}/${scene.filename}`;
+        document.getElementById('slideshowProgress').textContent = `Scene ${currentSlideIndex + 1} / ${currentSlideshow.scenes.length}`;
+        document.getElementById('sceneTitle').textContent = `Scene ${currentSlideIndex + 1}`;
+        document.getElementById('sceneDescription').textContent = scene.narrative || `Scene ${currentSlideIndex + 1} of the story`;
+        
+        // Update progress bar
+        const progress = ((currentSlideIndex + 1) / currentSlideshow.scenes.length) * 100;
+        document.getElementById('slideshowProgressBar').style.width = `${progress}%`;
+        
+        // Update thumbnails
+        document.querySelectorAll('#sceneThumbnails > div').forEach((thumb, index) => {
+            thumb.className = thumb.className.replace(/ring-2 ring-white/, '');
+            if (index === currentSlideIndex) {
+                thumb.className += ' ring-2 ring-white';
+            }
+        });
+        
+        // Handle audio if available
+        const audioControls = document.getElementById('audioControls');
+        const sceneAudio = document.getElementById('sceneAudio');
+        
+        // Debug logging
+        console.log(`Slideshow Debug - Scene ${currentSlideIndex + 1}:`, {
+            sceneNumber: scene.scene_number,
+            filename: scene.filename,
+            hasAudio: scene.has_audio,
+            audioUrl: scene.audio_url,
+            audioFilename: scene.audio_filename
+        });
+        
+        if (scene.has_audio && scene.audio_url) {
+            sceneAudio.src = scene.audio_url;
+            audioControls.classList.remove('hidden');
+            
+            // Auto-play audio in audio sync mode
+            if (slideshowInterval === 'audio' && isPlaying) {
+                sceneAudio.play().catch(e => console.log('Audio autoplay prevented:', e));
+            }
+        } else {
+            audioControls.classList.add('hidden');
+            sceneAudio.src = '';
+        }
+        
+        // Fade in
+        slideImage.style.opacity = '1';
+    }, 250);
+}
+
+function startSlideshowTimer() {
+    if (slideshowTimer) {
+        clearTimeout(slideshowTimer);
+    }
+    
+    if (!isPlaying || !currentSlideshow) return;
+    
+    let delay = 3000; // Default
+    
+    if (slideshowInterval === 'audio') {
+        // Use audio duration if available
+        const scene = currentSlideshow.scenes[currentSlideIndex];
+        if (scene.has_audio && scene.audio_url) {
+            // For audio sync, wait for audio to end
+            const sceneAudio = document.getElementById('sceneAudio');
+            sceneAudio.onended = () => {
+                if (isPlaying) {
+                    nextSlide();
+                }
+            };
+            return; // Don't set timer, rely on audio ending
+        } else {
+            delay = 5000; // Longer delay for scenes without audio
+        }
+    } else {
+        delay = parseInt(slideshowInterval);
+    }
+    
+    slideshowTimer = setTimeout(() => {
+        if (isPlaying) {
+            nextSlide();
+        }
+    }, delay);
+}
+
+function nextSlide() {
+    if (!currentSlideshow) return;
+    
+    currentSlideIndex = (currentSlideIndex + 1) % currentSlideshow.scenes.length;
+    updateSlideDisplay();
+    
+    if (isPlaying) {
+        startSlideshowTimer();
+    }
+}
+
+function previousSlide() {
+    if (!currentSlideshow) return;
+    
+    currentSlideIndex = currentSlideIndex === 0 ? currentSlideshow.scenes.length - 1 : currentSlideIndex - 1;
+    updateSlideDisplay();
+    
+    // Restart timer if playing
+    if (isPlaying) {
+        startSlideshowTimer();
+    }
+}
+
+function goToSlide(index) {
+    if (!currentSlideshow || index < 0 || index >= currentSlideshow.scenes.length) return;
+    
+    currentSlideIndex = index;
+    updateSlideDisplay();
+    
+    // Restart timer if playing
+    if (isPlaying) {
+        startSlideshowTimer();
+    }
+}
+
+function toggleSlideshowPlayPause() {
+    isPlaying = !isPlaying;
+    const icon = document.getElementById('playPauseIcon');
+    
+    if (isPlaying) {
+        icon.className = 'fas fa-pause';
+        startSlideshowTimer();
+    } else {
+        icon.className = 'fas fa-play';
+        if (slideshowTimer) {
+            clearTimeout(slideshowTimer);
+        }
+        // Pause audio if playing
+        const sceneAudio = document.getElementById('sceneAudio');
+        if (!sceneAudio.paused) {
+            sceneAudio.pause();
+        }
+    }
+}
+
+function setSlideInterval(speed) {
+    // Remove active state from all buttons
+    ['slowBtn', 'normalBtn', 'fastBtn', 'audioSyncBtn'].forEach(id => {
+        const btn = document.getElementById(id);
+        btn.className = btn.className.replace(/bg-blue-500|bg-purple-500/, 'bg-white').replace(/bg-opacity-80|bg-opacity-100/, 'bg-opacity-20');
+    });
+    
+    // Set new interval and highlight active button
+    switch(speed) {
+        case 'slow':
+            slideshowInterval = 5000;
+            document.getElementById('slowBtn').className = document.getElementById('slowBtn').className.replace('bg-white bg-opacity-20', 'bg-blue-500 bg-opacity-80');
+            break;
+        case 'normal':
+            slideshowInterval = 3000;
+            document.getElementById('normalBtn').className = document.getElementById('normalBtn').className.replace('bg-white bg-opacity-20', 'bg-blue-500 bg-opacity-80');
+            break;
+        case 'fast':
+            slideshowInterval = 1000;
+            document.getElementById('fastBtn').className = document.getElementById('fastBtn').className.replace('bg-white bg-opacity-20', 'bg-blue-500 bg-opacity-80');
+            break;
+        case 'audio':
+            slideshowInterval = 'audio';
+            document.getElementById('audioSyncBtn').className = document.getElementById('audioSyncBtn').className.replace('bg-purple-500 bg-opacity-80', 'bg-purple-500 bg-opacity-100');
+            break;
+    }
+    
+    // Restart timer with new interval
+    if (isPlaying) {
+        startSlideshowTimer();
+    }
+}
+
+function closeSlideshowModal() {
+    document.getElementById('slideshowModal').classList.add('hidden');
+    
+    // Clean up
+    if (slideshowTimer) {
+        clearTimeout(slideshowTimer);
+    }
+    
+    // Stop audio
+    const sceneAudio = document.getElementById('sceneAudio');
+    if (!sceneAudio.paused) {
+        sceneAudio.pause();
+    }
+    
+    currentSlideshow = null;
+    currentSlideIndex = 0;
+    isPlaying = true;
+}
+
+// Close modal when clicking outside
+document.getElementById('imageModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
+
+// Close slideshow modal when clicking outside
+document.getElementById('slideshowModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeSlideshowModal();
+    }
+});
+
+// Close modal with escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeModal();
+        closeStoryModal();
+        closeSlideshowModal();
+    }
+    
+    // Slideshow controls
+    if (currentSlideshow) {
+        switch(e.key) {
+            case 'ArrowLeft':
+                e.preventDefault();
+                previousSlide();
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                nextSlide();
+                break;
+            case ' ':
+                e.preventDefault();
+                toggleSlideshowPlayPause();
+                break;
+        }
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# Logs
+logs/
+*.log
+
+# Generated content (will use volumes)
+generated_images/
+
+# Documentation
+*.md
+docs/
+
+# GitHub
+.github/
+
+# Config files
+.pylintrc
+pytest.ini
+.coveragerc

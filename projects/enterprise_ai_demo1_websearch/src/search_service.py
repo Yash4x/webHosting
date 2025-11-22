@@ -1,0 +1,574 @@
+"""
+📖 CHAPTER 4: THE ORCHESTRATOR - Image Generation Service
+==========================================================
+
+STORY: Bringing It All Together
+--------------------------------
+So far we have created:
+- Models (the blueprints) - Chapter 1
+- Client (the messenger) - Chapter 2  
+- Parser (the translator) - Chapter 3
+
+Now we need someone to coordinate all these pieces. That's the Service!
+
+Think of it like a restaurant kitchen:
+- You (the customer) → place an order
+- Service (the head chef) → coordinates everything:
+  * Validates your order (is this prompt appropriate?)
+  * Delegates to specialists (Client talks to OpenAI)
+  * Quality control (Parser formats the response)
+  * Final presentation (returns clean ImageResult)
+
+The Service is where business logic lives. It doesn't know about:
+- ❌ HTTP requests (that's the Client's job)
+- ❌ Response parsing (that's the Parser's job)
+- ❌ User interface (that's the main app's job)
+
+It DOES know about:
+- ✓ Validation rules (what makes a valid prompt?)
+- ✓ Error handling (what if generation fails?)
+- ✓ Coordination (how to use Client + Parser together)
+- ✓ Business decisions (should we download the image?)
+
+LEARNING OBJECTIVES:
+-------------------
+✓ Understand service layer patterns
+✓ Learn business logic separation
+✓ Master error handling and validation
+✓ See how to coordinate multiple components
+✓ Appreciate clean architecture principles
+"""
+
+import os
+import re
+import requests
+from typing import Optional, List
+from datetime import datetime
+
+from src.client import ImageGenerationClient
+from src.parser import ImageResponseParser
+from src.models import (
+    ImageOptions, ImageResult, ImageError, 
+    StoryOptions, StoryScene, StoryResult
+)
+
+
+class ImageGenerationService:
+    """
+    Service for coordinating image generation operations.
+    
+    📚 CONCEPT: The Service Layer Pattern  
+    --------------------------------------
+    This is the "business logic" layer of our application. It sits between
+    the user interface (main.py) and the technical details (client.py, parser.py).
+    
+    RESPONSIBILITIES:
+    1. Validate user input (is the prompt appropriate?)
+    2. Coordinate components (client + parser)
+    3. Handle errors gracefully
+    4. Apply business rules (download policies, etc.)
+    5. Provide a clean API for the main application
+    
+    🎯 REAL-WORLD ANALOGY:
+    Think of this like a photo studio manager:
+    - Customer says: "I want a portrait"
+    - Manager validates: "Do you have ID? Budget approved?"
+    - Manager coordinates: Tells photographer what to shoot
+    - Manager handles problems: "Camera broke, we'll use backup"
+    - Manager delivers: Gives customer finished photos
+    
+    📝 DESIGN PRINCIPLE: Dependency Inversion
+    -----------------------------------------
+    Notice we inject the API key rather than hardcoding it. This makes
+    the service flexible and testable:
+    
+    ✅ GOOD: service = ImageGenerationService(api_key=test_key)
+    ❌ BAD:  service always uses production API key
+    """
+    
+    def __init__(self, api_key: Optional[str] = None):
+        """
+        Initialize the image generation service.
+        
+        📚 CONCEPT: Composition over Inheritance
+        ----------------------------------------
+        Instead of inheriting from Client or Parser, we COMPOSE them.
+        This is more flexible because:
+        - Easy to swap implementations (different AI providers)
+        - Clear separation of concerns
+        - Easier to test (can mock individual components)
+        
+        Args:
+            api_key: OpenAI API key
+            
+        Raises:
+            ValueError: If no API key is provided
+        """
+        if not api_key:
+            raise ValueError("API key is required")
+        
+        # Compose our dependencies
+        self.client = ImageGenerationClient(api_key=api_key)
+        self.parser = ImageResponseParser()
+    
+    def generate_image(self, prompt: str, options: Optional[ImageOptions] = None, auto_save: bool = True, save_dir: str = "generated_images") -> ImageResult:
+        """
+        Generate an image from a text prompt.
+        
+        📚 CONCEPT: Template Method Pattern
+        -----------------------------------
+        This method follows the same pattern every time:
+        1. Validate input
+        2. Set defaults
+        3. Call external service
+        4. Parse response
+        5. Auto-download and save (NEW!)
+        6. Handle errors
+        
+        EXAMPLE USAGE:
+        >>> service = ImageGenerationService(api_key="sk-...")
+        >>> result = service.generate_image("A space cat")
+        >>> print(f"Generated: {result.image_url}")
+        >>> print(f"Saved to: {result.file_path}")  # Automatically saved!
+        
+        Args:
+            prompt: Text description of the desired image
+            options: Optional generation configuration
+            auto_save: Whether to automatically download and save the image (default: True)
+            save_dir: Directory to save images in (default: "generated_images")
+            
+        Returns:
+            ImageResult with generated image data and local file path
+            
+        Raises:
+            ValueError: If prompt is invalid
+            ImageError: If generation fails
+        """
+        # Step 1: Validate input
+        if not self.validate_prompt(prompt):
+            raise ValueError("Invalid prompt: must be non-empty and under 4000 characters")
+        
+        # Step 2: Set defaults
+        if options is None:
+            options = ImageOptions()
+        
+        try:
+            # Step 3: Call external service
+            raw_response = self.client.generate_image(prompt, options)
+            
+            # Step 4: Parse response
+            result = self.parser.parse(raw_response, prompt)
+            
+            # Step 5: Auto-download and save (NEW!)
+            if auto_save and result.image_url:
+                # Generate a safe filename from the prompt
+                safe_filename = self._generate_safe_filename(prompt, result.generation_id)
+                save_path = os.path.join(save_dir, safe_filename)
+                
+                # Download and save the image
+                result = self.download_and_save_image(result, save_path)
+            
+            return result
+            
+        except ImageError:
+            # Re-raise our custom errors (they're already well-formatted)
+            raise
+        except Exception as e:
+            # Wrap unexpected errors
+            raise ImageError(
+                code="GENERATION_FAILED",
+                message=f"Image generation failed: {str(e)}",
+                details={"original_error": str(e)}
+            )
+    
+    def generate_and_save(self, prompt: str, save_path: str, options: Optional[ImageOptions] = None) -> ImageResult:
+        """
+        Generate an image and save it to a file.
+        
+        📚 CONCEPT: Convenience Methods
+        -------------------------------
+        This is a "convenience method" that combines two common operations:
+        1. Generate image
+        2. Download and save it
+        
+        This saves users from having to call multiple methods, making the
+        API easier to use for common scenarios.
+        
+        Args:
+            prompt: Text description of the desired image
+            save_path: Where to save the image file
+            options: Optional generation configuration
+            
+        Returns:
+            ImageResult with image saved to file
+            
+        Raises:
+            ValueError: If prompt or save_path is invalid
+            ImageError: If generation or saving fails
+        """
+        # Generate the image first
+        result = self.generate_image(prompt, options)
+        
+        # Download and save
+        result = self.download_and_save_image(result, save_path)
+        
+        return result
+    
+    def download_and_save_image(self, result: ImageResult, save_path: str) -> ImageResult:
+        """
+        Download an image from URL and save to file.
+        
+        📚 CONCEPT: Side Effects and Immutability
+        -----------------------------------------
+        This method modifies the ImageResult object (adds file_path and image_data).
+        In a more functional style, we'd return a new object. But for simplicity
+        and performance, we modify the existing one.
+        
+        Args:
+            result: ImageResult with image_url
+            save_path: Where to save the image file
+            
+        Returns:
+            Updated ImageResult with image saved to file
+            
+        Raises:
+            ImageError: If download or save fails
+        """
+        if not result.image_url:
+            raise ImageError(
+                code="DOWNLOAD_ERROR",
+                message="No image URL available for download",
+                details={"result": str(result)}
+            )
+        
+        try:
+            # Download image data
+            response = requests.get(result.image_url, timeout=30)
+            response.raise_for_status()
+            
+            # Update result with image data
+            result.image_data = response.content
+            
+            # Save to file
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, 'wb') as f:
+                f.write(result.image_data)
+            
+            # Update result with file path
+            result.file_path = save_path
+            
+            return result
+            
+        except requests.RequestException as e:
+            raise ImageError(
+                code="DOWNLOAD_ERROR",
+                message=f"Failed to download image: {str(e)}",
+                details={"url": result.image_url, "error": str(e)}
+            )
+        except OSError as e:
+            raise ImageError(
+                code="SAVE_ERROR",
+                message=f"Failed to save image: {str(e)}",
+                details={"save_path": save_path, "error": str(e)}
+            )
+    
+    def validate_prompt(self, prompt: str) -> bool:
+        """
+        Validate an image generation prompt.
+        
+        📚 CONCEPT: Business Rules Validation
+        -------------------------------------
+        Different from technical validation (in the client). This checks
+        business rules:
+        - Length limits (user experience)
+        - Content appropriateness (basic checks)
+        - Format requirements
+        
+        🎯 WHY VALIDATE HERE?
+        ---------------------
+        - Fail fast (before expensive API calls)
+        - Better user experience (clear error messages)
+        - Cost control (avoid wasted API credits)
+        - Consistent rules (all entry points use same validation)
+        
+        Args:
+            prompt: The prompt to validate
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        if not prompt:
+            return False
+        
+        # Check if prompt is just whitespace
+        if not prompt.strip():
+            return False
+        
+        # Check length (OpenAI limit is 4000 characters)
+        if len(prompt) > 4000:
+            return False
+        
+        # Basic content checks (extend as needed)
+        prompt_lower = prompt.lower()
+        
+        # Check for potentially problematic content
+        # (This is basic - real content filtering would be more sophisticated)
+        problematic_terms = ['violence', 'gore', 'explicit']
+        if any(term in prompt_lower for term in problematic_terms):
+            return False
+        
+        return True
+    
+    def create_options_for_quality(self, quality: str = "standard") -> ImageOptions:
+        """
+        Create ImageOptions configured for a specific quality level.
+        
+        📚 CONCEPT: Factory Methods
+        ---------------------------
+        Instead of making users understand all the technical details of
+        ImageOptions, we provide convenient factory methods for common scenarios.
+        
+        EXAMPLE USAGE:
+        >>> # Instead of this complex setup:
+        >>> options = ImageOptions(
+        ...     model="dall-e-3",
+        ...     size="1024x1024", 
+        ...     quality="hd",
+        ...     style="vivid"
+        ... )
+        >>> 
+        >>> # Users can do this:
+        >>> options = service.create_options_for_quality("high")
+        
+        Args:
+            quality: Quality level ("standard", "high", "fast")
+            
+        Returns:
+            ImageOptions configured for the requested quality
+            
+        Raises:
+            ValueError: If quality level is unknown
+        """
+        if quality == "standard":
+            return ImageOptions(
+                model="dall-e-3",
+                size="1024x1024",
+                quality="standard",
+                style="natural"
+            )
+        elif quality == "high":
+            return ImageOptions(
+                model="dall-e-3",
+                size="1024x1024",
+                quality="hd",
+                style="vivid"
+            )
+        elif quality == "fast":
+            return ImageOptions(
+                model="dall-e-2",
+                size="512x512"
+            )
+        else:
+            raise ValueError(f"Unknown quality level: {quality}. Use 'standard', 'high', or 'fast'")
+    
+    def _generate_safe_filename(self, prompt: str, generation_id: str) -> str:
+        """
+        Generate a safe filename from a prompt and generation ID.
+        
+        📚 CONCEPT: Defensive Programming
+        ---------------------------------
+        User prompts can contain characters that aren't safe for filenames:
+        - Spaces, special characters, unicode
+        - Very long prompts
+        - System-reserved names
+        
+        This method creates clean, filesystem-safe filenames.
+        
+        Args:
+            prompt: The original image prompt
+            generation_id: Unique identifier for this generation
+            
+        Returns:
+            Safe filename with .png extension
+            
+        Example:
+            prompt = "A cat wearing a space helmet!"
+            generation_id = "gen-abc123"
+            result = "a_cat_wearing_a_space_helmet_gen-abc123.png"
+        """
+        # Clean the prompt: lowercase, replace spaces and special chars with underscores
+        clean_prompt = re.sub(r'[^\w\s-]', '', prompt.lower())
+        clean_prompt = re.sub(r'[-\s]+', '_', clean_prompt)
+        
+        # Truncate if too long (keep it under 50 chars for readability)
+        if len(clean_prompt) > 50:
+            clean_prompt = clean_prompt[:50].rstrip('_')
+        
+        # Add timestamp for uniqueness
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Combine: prompt + timestamp + generation_id
+        filename = f"{clean_prompt}_{timestamp}_{generation_id}.png"
+        
+        return filename
+
+    def _get_next_story_folder(self, base_dir: str = "generated_images") -> str:
+        """
+        Get the next available story folder name.
+        
+        Creates folders like: generated_images/story_1, generated_images/story_2, etc.
+        
+        Args:
+            base_dir: Base directory for generated images
+            
+        Returns:
+            Path to the next story folder
+        """
+        import os
+        
+        # Ensure base directory exists
+        os.makedirs(base_dir, exist_ok=True)
+        
+        # Find the next available story number
+        story_num = 1
+        while True:
+            story_folder = os.path.join(base_dir, f"story_{story_num}")
+            if not os.path.exists(story_folder):
+                # Create the folder
+                os.makedirs(story_folder, exist_ok=True)
+                print(f"📁 Created story folder: {story_folder}")
+                return story_folder
+            story_num += 1
+
+    def generate_story(self, story_options: StoryOptions) -> StoryResult:
+        """
+        Generate a visual story from a prompt.
+        
+        This method:
+        1. Uses GPT to decompose the story into scenes
+        2. Generates an image for each scene
+        3. Optionally saves all images to local files
+        4. Returns a complete story result
+        
+        Args:
+            story_options: Configuration for story generation
+            
+        Returns:
+            StoryResult with all scenes and metadata
+            
+        Raises:
+            ImageError: If story generation fails
+        """
+        start_time = datetime.now()
+        
+        try:
+            # Step 1: Decompose story into scenes using GPT
+            print(f"🎬 Decomposing story: {story_options.story_prompt}")
+            scenes = self.client.decompose_story(story_options)
+            print(f"✅ Created {len(scenes)} scenes")
+            
+            # Step 1.5: Create dedicated story folder if auto_save is enabled
+            story_folder = None
+            if story_options.auto_save:
+                story_folder = self._get_next_story_folder()
+            
+            # Step 2: Generate images for each scene
+            for i, scene in enumerate(scenes, 1):
+                try:
+                    print(f"🎨 Generating scene {i}/{len(scenes)}: {scene.narrative}")
+                    
+                    # Create image options for this scene
+                    image_options = ImageOptions(
+                        model=story_options.model,
+                        size=story_options.size,
+                        quality=story_options.quality,
+                        style=story_options.style
+                    )
+                    
+                    # Generate the image using the scene's image prompt
+                    if story_options.auto_save and story_folder:
+                        # Use the story folder as save directory
+                        scene.image_result = self.generate_image(
+                            scene.image_prompt,  # Use the detailed image prompt
+                            image_options, 
+                            auto_save=True,
+                            save_dir=story_folder
+                        )
+                    else:
+                        # Standard generation without saving
+                        scene.image_result = self.generate_image(
+                            scene.image_prompt,  # Use the detailed image prompt
+                            image_options, 
+                            auto_save=False
+                        )
+                    
+                    print(f"✅ Scene {i} generated successfully")
+                    
+                    # Step 2.5: Generate audio narration if enabled
+                    if story_options.enable_narration:
+                        try:
+                            print(f"🎙️  Generating narration for scene {i}...")
+                            audio_data = self.client.generate_scene_narration(
+                                scene,
+                                voice=story_options.voice,
+                                speed=story_options.narration_speed
+                            )
+                            
+                            # Save audio file if auto_save is enabled
+                            if story_options.auto_save and story_folder:
+                                audio_filename = f"scene_{i}_narration.mp3"
+                                audio_path = os.path.join(story_folder, audio_filename)
+                                
+                                with open(audio_path, 'wb') as audio_file:
+                                    audio_file.write(audio_data)
+                                
+                                scene.audio_file_path = audio_path
+                                print(f"🔊 Scene {i} narration saved to: {audio_path}")
+                            
+                        except Exception as e:
+                            print(f"⚠️  Scene {i} narration failed: {str(e)}")
+                            # Continue without audio - don't fail the whole story
+                    
+                except Exception as e:
+                    print(f"❌ Scene {i} failed: {str(e)}")
+                    # Continue with other scenes even if one fails
+                    continue
+            
+            # Step 3: Create story result
+            total_time = (datetime.now() - start_time).total_seconds()
+            
+            story_result = StoryResult(
+                story_prompt=story_options.story_prompt,
+                scenes=scenes,
+                generation_time=start_time,
+                total_generation_time=total_time
+            )
+            
+            # Step 4: Print summary
+            completed = len(story_result.completed_scenes)
+            total = len(scenes)
+            print(f"\n🎭 Story Generation Complete!")
+            print(f"📊 Success Rate: {story_result.success_rate:.1f}% ({completed}/{total} scenes)")
+            print(f"⏱️  Total Time: {total_time:.2f} seconds")
+            
+            if story_options.auto_save and story_result.completed_scenes:
+                if story_folder:
+                    print(f"📁 Story saved in: {story_folder}")
+                    print(f"💾 Scene files:")
+                    for filename in story_result.get_scene_filenames():
+                        # Show just the filename, since we already showed the folder
+                        print(f"   - {os.path.basename(filename)}")
+                else:
+                    print(f"💾 Saved files:")
+                    for filename in story_result.get_scene_filenames():
+                        print(f"   - {filename}")
+            
+            return story_result
+            
+        except Exception as e:
+            if isinstance(e, ImageError):
+                raise
+            raise ImageError(
+                "STORY_GENERATION_ERROR",
+                f"Failed to generate story: {str(e)}"
+            )

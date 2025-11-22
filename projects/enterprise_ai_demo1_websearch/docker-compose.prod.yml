@@ -1,0 +1,30 @@
+# Production docker-compose file for deployment with Watchtower
+
+services:
+  ai-app:
+    image: ${DOCKERHUB_USERNAME}/ai-image-generator:latest
+    container_name: ai-image-generator
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./generated_images:/app/generated_images
+      - ./logs:/app/logs
+    networks:
+      - web
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  web:
+    external: true
