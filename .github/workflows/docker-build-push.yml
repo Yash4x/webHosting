@@ -13,11 +13,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # If you have tests, add them here before building
-      # - name: Run tests
-      #   run: |
-      #     echo "Add your test command here"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -30,6 +25,11 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          # 🔹 Build FROM the project folder, not repo root
+          context: ./projects/enterprise_ai_demo1_websearch
+
+          # 🔹 Explicit path to the Dockerfile
+          file: ./projects/enterprise_ai_demo1_websearch/Dockerfile
+
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/webhosting:latest
