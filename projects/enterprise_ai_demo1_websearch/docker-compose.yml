@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aiimages
+      POSTGRES_USER: aiuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aipassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiuser -d aiimages"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ai-app:
     build: .
     container_name: ai-image-generator
@@ -9,17 +27,25 @@ services:
       - FLASK_APP=app.py
       - FLASK_ENV=production
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://aiuser:${POSTGRES_PASSWORD:-aipassword}@postgres:5432/aiimages
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
     volumes:
       - ./generated_images:/app/generated_images
       - ./logs:/app/logs
     networks:
       - web
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+
+volumes:
+  postgres_data:
 
 networks:
   web:

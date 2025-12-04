@@ -12,9 +12,14 @@ import shutil
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from flask import Flask, render_template, request, jsonify, send_from_directory, url_for
+from flask import Flask, render_template, request, jsonify, send_from_directory, url_for, redirect, flash, session
 from flask_cors import CORS
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_sqlalchemy import SQLAlchemy
+from flask_bcrypt import Bcrypt
+from flask_migrate import Migrate
 from dotenv import load_dotenv
+from functools import wraps
 
 from src.search_service import ImageGenerationService
 from src.models import ImageOptions, StoryOptions, ImageResult, StoryResult
@@ -25,7 +30,22 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL',
+    'postgresql://aiuser:aipassword@postgres:5432/aiimages'
+)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize extensions
 CORS(app)
+db = SQLAlchemy(app)
+bcrypt = Bcrypt(app)
+migrate = Migrate(app, db)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
+login_manager.login_message_category = 'info'
 
 # Set up logging
 setup_logging()
@@ -42,6 +62,219 @@ service = ImageGenerationService(api_key=api_key)
 os.makedirs("generated_images", exist_ok=True)
 os.makedirs("static/generated", exist_ok=True)  # For web-accessible images
 
+# Database Models - defined here to avoid circular imports
+class User(db.Model):
+    """User model for authentication"""
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    
+    # Flask-Login integration
+    @property
+    def is_authenticated(self):
+        return True
+    
+    @property
+    def is_anonymous(self):
+        return False
+    
+    def get_id(self):
+        return str(self.id)
+    
+    # Relationships
+    generated_images = db.relationship('GeneratedImage', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+    
+    def __repr__(self):
+        return f'<User {self.username}>'
+    
+    def to_dict(self):
+        """Convert user to dictionary"""
+        return {
+            'id': self.id,
+            'username': self.username,
+            'email': self.email,
+            'created_at': self.created_at.isoformat(),
+            'image_count': self.generated_images.count()
+        }
+
+
+class GeneratedImage(db.Model):
+    """Track generated images per user"""
+    __tablename__ = 'generated_images'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    prompt = db.Column(db.Text, nullable=False)
+    image_type = db.Column(db.String(20), nullable=False)  # 'single' or 'story'
+    file_path = db.Column(db.String(500), nullable=False)
+    image_url = db.Column(db.String(500))
+    image_metadata = db.Column(db.JSON)  # Renamed from 'metadata' (reserved word in SQLAlchemy)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    
+    def __repr__(self):
+        return f'<GeneratedImage {self.id} by User {self.user_id}>'
+    
+    def to_dict(self):
+        """Convert image to dictionary"""
+        return {
+            'id': self.id,
+            'prompt': self.prompt,
+            'image_type': self.image_type,
+            'file_path': self.file_path,
+            'image_url': self.image_url,
+            'image_metadata': self.image_metadata,
+            'created_at': self.created_at.isoformat()
+        }
+
+# User loader for Flask-Login
+@login_manager.user_loader
+def load_user(user_id):
+    """Load user by ID for Flask-Login"""
+    return User.query.get(int(user_id))
+
+
+# ==================== Authentication Routes ====================
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    """User registration page"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        data = request.get_json() if request.is_json else request.form
+        username = data.get('username', '').strip()
+        email = data.get('email', '').strip()
+        password = data.get('password', '')
+        confirm_password = data.get('confirm_password', '')
+        
+        # Validation
+        errors = []
+        if not username or len(username) < 3:
+            errors.append('Username must be at least 3 characters')
+        if not email or '@' not in email:
+            errors.append('Valid email is required')
+        if not password or len(password) < 6:
+            errors.append('Password must be at least 6 characters')
+        if password != confirm_password:
+            errors.append('Passwords do not match')
+        
+        # Check existing user
+        if User.query.filter_by(username=username).first():
+            errors.append('Username already exists')
+        if User.query.filter_by(email=email).first():
+            errors.append('Email already registered')
+        
+        if errors:
+            if request.is_json:
+                return jsonify({'error': ', '.join(errors)}), 400
+            flash(', '.join(errors), 'error')
+            return render_template('register.html')
+        
+        # Create new user
+        try:
+            hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+            user = User(username=username, email=email, password_hash=hashed_password)
+            db.session.add(user)
+            db.session.commit()
+            
+            logger.info(f"New user registered: {username}")
+            
+            if request.is_json:
+                return jsonify({'success': True, 'message': 'Registration successful'}), 201
+            
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Registration error: {str(e)}")
+            if request.is_json:
+                return jsonify({'error': 'Registration failed'}), 500
+            flash('Registration failed. Please try again.', 'error')
+    
+    return render_template('register.html')
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """User login page"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        data = request.get_json() if request.is_json else request.form
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        remember = data.get('remember', False)
+        
+        if not username or not password:
+            if request.is_json:
+                return jsonify({'error': 'Username and password required'}), 400
+            flash('Username and password required', 'error')
+            return render_template('login.html')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and bcrypt.check_password_hash(user.password_hash, password):
+            login_user(user, remember=remember)
+            logger.info(f"User logged in: {username}")
+            
+            next_page = request.args.get('next')
+            if request.is_json:
+                return jsonify({
+                    'success': True,
+                    'message': 'Login successful',
+                    'redirect': next_page or url_for('dashboard')
+                }), 200
+            
+            return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+        else:
+            if request.is_json:
+                return jsonify({'error': 'Invalid username or password'}), 401
+            flash('Invalid username or password', 'error')
+    
+    return render_template('login.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    """User logout"""
+    username = current_user.username
+    logout_user()
+    logger.info(f"User logged out: {username}")
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('index'))
+
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """User dashboard showing their generated images"""
+    # Get user's generated images
+    images = GeneratedImage.query.filter_by(user_id=current_user.id)\
+        .order_by(GeneratedImage.created_at.desc())\
+        .limit(50)\
+        .all()
+    
+    # Get statistics
+    total_images = current_user.generated_images.count()
+    total_stories = current_user.generated_images.filter_by(image_type='story').count()
+    total_singles = current_user.generated_images.filter_by(image_type='single').count()
+    
+    return render_template('dashboard.html',
+                         images=images,
+                         total_images=total_images,
+                         total_stories=total_stories,
+                         total_singles=total_singles)
+
+
+# ==================== Public Routes ====================
 
 @app.route('/')
 def index():
@@ -50,24 +283,28 @@ def index():
 
 
 @app.route('/generate')
+@login_required
 def generate_page():
     """Single image generation page."""
     return render_template('generate.html')
 
 
 @app.route('/story')
+@login_required
 def story_page():
     """Visual story generation page."""
     return render_template('story.html')
 
 
 @app.route('/gallery')
+@login_required
 def gallery_page():
     """Gallery page to view all generated content."""
     return render_template('gallery.html')
 
 
 @app.route('/api/generate-image', methods=['POST'])
+@login_required
 def api_generate_image():
     """API endpoint for single image generation."""
     try:
@@ -106,6 +343,28 @@ def api_generate_image():
         # Copy to web-accessible location
         web_path = _copy_to_web_accessible(result.file_path, "single_image")
         
+        # Save to database
+        try:
+            generated_img = GeneratedImage(
+                user_id=current_user.id,
+                prompt=prompt,
+                image_type='single',
+                file_path=result.file_path,
+                image_url=result.image_url,
+                image_metadata={
+                    'revised_prompt': result.metadata.revised_prompt if result.metadata else None,
+                    'size': options.size,
+                    'quality': options.quality,
+                    'style': options.style,
+                    'generation_time': generation_time
+                }
+            )
+            db.session.add(generated_img)
+            db.session.commit()
+        except Exception as db_error:
+            logger.error(f"Failed to save image to database: {str(db_error)}")
+            db.session.rollback()
+        
         response_data = {
             'success': True,
             'image_url': result.image_url,
@@ -116,7 +375,7 @@ def api_generate_image():
             'timestamp': datetime.now().isoformat()
         }
         
-        logger.info(f"Single image generated successfully: {result.file_path}")
+        logger.info(f"Single image generated successfully by {current_user.username}: {result.file_path}")
         return jsonify(response_data)
         
     except Exception as e:
@@ -125,6 +384,7 @@ def api_generate_image():
 
 
 @app.route('/api/generate-story', methods=['POST'])
+@login_required
 def api_generate_story():
     """API endpoint for story generation."""
     try:
@@ -208,29 +468,34 @@ def api_generate_story():
 
 
 @app.route('/api/gallery')
+@login_required
 def api_gallery():
-    """Get list of all generated images and stories."""
+    """Get list of generated images and stories for the current user only."""
     try:
+        # Query database for current user's images
+        images = GeneratedImage.query.filter_by(user_id=current_user.id).order_by(GeneratedImage.created_at.desc()).all()
+        
         gallery_items = []
         
-        # Scan generated_images directory
-        if os.path.exists("generated_images"):
-            for item in os.listdir("generated_images"):
-                item_path = os.path.join("generated_images", item)
+        for img in images:
+            # Check if file still exists
+            if not os.path.exists(img.file_path):
+                continue
                 
-                if os.path.isdir(item_path):
-                    # This is a story folder
-                    story_info = _get_story_info(item_path)
-                    if story_info:
-                        gallery_items.append(story_info)
-                elif item.endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                    # This is a single image
-                    image_info = _get_image_info(item_path)
-                    if image_info:
-                        gallery_items.append(image_info)
-        
-        # Sort by creation time (newest first)
-        gallery_items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            if img.image_type == 'story':
+                # This is a story folder
+                story_info = _get_story_info(img.file_path)
+                if story_info:
+                    story_info['db_id'] = img.id
+                    story_info['prompt'] = img.prompt
+                    gallery_items.append(story_info)
+            else:
+                # This is a single image
+                image_info = _get_image_info(img.file_path)
+                if image_info:
+                    image_info['db_id'] = img.id
+                    image_info['prompt'] = img.prompt
+                    gallery_items.append(image_info)
         
         return jsonify({'items': gallery_items})
         

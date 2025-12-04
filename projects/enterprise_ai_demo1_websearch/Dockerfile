@@ -27,6 +27,10 @@ COPY . .
 RUN mkdir -p generated_images static/generated logs && \
     chmod -R 755 generated_images static logs
 
+# Copy entrypoint script
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
 # Create non-root user for security
 RUN useradd -m -u 1001 appuser && \
     chown -R appuser:appuser /app
@@ -41,5 +45,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5000/', timeout=5)"
 
-# Run the application
-CMD ["python", "app.py"]
+# Run the application using entrypoint script
+ENTRYPOINT ["./entrypoint.sh"]

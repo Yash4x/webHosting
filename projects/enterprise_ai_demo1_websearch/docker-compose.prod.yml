@@ -1,6 +1,24 @@
 # Production docker-compose file for deployment with Watchtower
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aiimages
+      POSTGRES_USER: aiuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiuser -d aiimages"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ai-app:
     image: ${DOCKERHUB_USERNAME}/ai-image-generator:latest
     container_name: ai-image-generator
@@ -11,11 +29,16 @@ services:
       - FLASK_APP=app.py
       - FLASK_ENV=production
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://aiuser:${POSTGRES_PASSWORD}@postgres:5432/aiimages
+      - SECRET_KEY=${SECRET_KEY}
     volumes:
       - ./generated_images:/app/generated_images
       - ./logs:/app/logs
     networks:
       - web
+    depends_on:
+      postgres:
+        condition: service_healthy
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     healthcheck:
@@ -24,6 +47,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+volumes:
+  postgres_data:
 
 networks:
   web:
